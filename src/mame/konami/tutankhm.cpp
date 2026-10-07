@@ -46,8 +46,28 @@
 
  line 420 seems to be related to 419 which is connect to reset circuit -> watchdog
 
- There are two star fields implemented here. The active one can be selected in
+ There are three star fields implemented here. The active one can be selected in
  Machine Configuration.
+
+ c) Konami 084 (default)
+
+ Reverse engineered from a real Konami 084, exercised on a chip tester, and
+ checked against logic analyser captures of a running Tutankham board (D09 and
+ the star colours match the board at every pixel of a captured frame):
+ - a 17-bit LFSR, held at 0 during VBLANK (and while Stars Enable is low),
+   shifting left with NOT(bit 16) XOR bit 4 inserted at bit 0;
+ - it steps once per pixel while 256H* is high, plus once more just after 256H*
+   falls: 257 steps per line. Pixel x of visible line L shows the LFSR after
+   1 + 257*L + x steps;
+ - a star when bits 0-7 are all 1, bit 16 is 0, V1 XOR H8Q, the blink state's
+   enable (0: always, 1: bit 8, 2: V2, 3: bit 10; a 2-bit counter on the 555)
+   and Aux. Enable (on Tutankham: raster pixels 68-259, and only where the
+   game's pixel is black);
+ - colour = NOT bits 8-13 on pins 13-18 (Red, Red, Green, Green, Blue, Blue;
+   each colour's low pin through 150 ohm, high pin through 100 ohm);
+ - stars are one pixel wide and appear about half a pixel late.
+ (After VSYNC the first two steps are skipped unless HFF is high, but that
+ happens during VBLANK, while the LFSR is held at 0, so it never shows.)
 
  a) Scramble Starfield
 
@@ -59,10 +79,8 @@
  Guru provided schematics of a daughter-board which on a Konami bootleg replaced
  custom chip 084. This starfield matches the starfield (picture) of this bootleg.
 
- None of the two alterntives reproduces the star field which can be observed in
- the Stern videos below.
-
- FIXME: For an exact emulation we need a 084 at some time.
+ Neither a) nor b) reproduces the star field which can be observed in the
+ Stern videos below.
  FIXME: The Konami video below is different from tutankhm. Looks like we
         are missing an early board dump
 
@@ -246,9 +264,10 @@ static INPUT_PORTS_START( tutankhm )
 	// "No Coin B" = coins produce sound, but no effect on coin counter
 
 	PORT_START("STARS")
-	PORT_CONFNAME( 0x01, 0x01, "Starfield selection" )
+	PORT_CONFNAME( 0x03, 0x02, "Starfield selection" )
 	PORT_CONFSETTING(    0x00, "Konami HW bootleg (6MHz stars)" )
 	PORT_CONFSETTING(    0x01, "Scramble implementation" )
+	PORT_CONFSETTING(    0x02, "Konami 084" )
 INPUT_PORTS_END
 
 

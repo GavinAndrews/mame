@@ -132,10 +132,91 @@ uint32_t tutankhm_state::screen_update(screen_device &screen, bitmap_rgb32 &bitm
 		stars_init();
 	}
 
-	if (m_star_mode)
-		return screen_update_scramble(screen, bitmap, cliprect);
-	else
-		return screen_update_bootleg(screen, bitmap, cliprect);
+	switch (m_star_mode)
+	{
+		case 0:  return screen_update_bootleg(screen, bitmap, cliprect);
+		case 1:  return screen_update_scramble(screen, bitmap, cliprect);
+		default: return screen_update_k084(screen, bitmap, cliprect);
+	}
+}
+
+/*
+    Konami 084 starfield, as measured on the real chip (see the notes in tutankhm.cpp).
+    The LFSR is reset during VBLANK and steps 257 times per line, so pixel x of visible line l
+    shows the LFSR after 1 + 257 * l + x steps. Stars are drawn over black (pen 0) game pixels,
+    inside the Aux. Enable window (raster pixels 68-259), one pixel wide and half a pixel late.
+*/
+uint32_t tutankhm_state::screen_update_k084(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect)
+{
+	// the game's pixels, as in the other modes but without a starfield underneath
+	bitmap.fill(rgb_t::black(), cliprect);
+
+	int const xorx = m_flipscreen_x ? 255 : 0;
+	int const xory = m_flipscreen_y ? 255 : 0;
+	int const minx = cliprect.min_x / GALAXIAN_XSCALE;
+	int const maxx = cliprect.max_x / GALAXIAN_XSCALE;
+
+	for (int y = cliprect.min_y; y <= cliprect.max_y; y++)
+	{
+		uint32_t *const dst = &bitmap.pix(y);
+		bool black[256];
+
+		for (int x = minx; x <= maxx; x++)
+		{
+			uint8_t const effx = x ^ xorx;
+			uint8_t const yscroll = (effx < 192 && m_scroll.found()) ? *m_scroll : 0;
+			uint8_t const effy = (y ^ xory) + yscroll;
+			uint8_t const vrambyte = m_videoram[effy * 128 + effx / 2];
+			uint8_t const pen = (vrambyte >> (4 * (effx & 1))) & 0x0f;
+			black[x] = (pen == 0);
+			rgb_t const color = m_palette->pen_color(pen);
+			u32 *const dbase = dst + x * GALAXIAN_XSCALE;
+			dbase[0] = dbase[1] = dbase[2] = color;
+		}
+
+		if (!m_stars_enabled || y < GALAXIAN_VBEND || y >= GALAXIAN_VBSTART)
+			continue;
+
+		int const line = y - GALAXIAN_VBEND;              // visible line: 0 = first after VBLANK
+		bool const v1 = !BIT(line, 0);
+		bool const v2 = BIT(line, 1);
+		uint8_t const sel = m_stars_blink_state & 3;
+		uint32_t offs = (1 + 257 * uint32_t(line) + minx) % STAR_RNG_PERIOD;
+
+		// Aux. Enable: raster pixels 68-259 (from 64H and 128H), and only where the game's pixel is black
+		auto const aux = [&black] (int px) { return px >= 68 && black[px]; };
+
+		for (int x = minx; x <= maxx; x++, offs = (offs + 1 == STAR_RNG_PERIOD) ? 0 : offs + 1)
+		{
+			uint32_t const lfsr = m_k084_lfsr[offs];
+			bool const h8q = !BIT(x, 3);
+			bool enab = true;
+			switch (sel)
+			{
+				case 1: enab = BIT(lfsr, 8);  break;
+				case 2: enab = v2;            break;
+				case 3: enab = BIT(lfsr, 10); break;
+			}
+
+			if (!enab || (v1 == h8q) || BIT(lfsr, 16) || (lfsr & 0xff) != 0xff || !aux(x))
+				continue;
+
+			// pins 13-18 = NOT bits 8-13 = Red_l, Red_h, Green_l, Green_h, Blue_l, Blue_h; the star palette
+			// wants bit 5/4 = red 150/100 ohm, bit 3/2 = green, bit 1/0 = blue
+			uint8_t const pins = ~(lfsr >> 8) & 0x3f;
+			uint8_t const index = bitswap<6>(pins, 0, 1, 2, 3, 4, 5);
+			rgb_t const color = m_star_color[index];
+
+			// one pixel wide, starting half a pixel late: sub-pixels 1 and 2 of x, and 0 of x + 1 unless
+			// Aux. Enable cuts it off there
+			bitmap.pix(y, GALAXIAN_XSCALE * x + 1) = color;
+			bitmap.pix(y, GALAXIAN_XSCALE * x + 2) = color;
+			if (x < maxx && aux(x + 1))
+				bitmap.pix(y, GALAXIAN_XSCALE * (x + 1)) = color;
+		}
+	}
+
+	return 0;
 }
 
 /*************************************
@@ -277,7 +358,25 @@ void tutankhm_state::video_start()
 
 void tutankhm_state::stars_init()
 {
-	(m_star_mode) ? stars_init_scramble() : stars_init_bootleg();
+	switch (m_star_mode)
+	{
+		case 0:  stars_init_bootleg();  break;
+		case 1:  stars_init_scramble(); break;
+		default: stars_init_k084();     break;
+	}
+}
+
+void tutankhm_state::stars_init_k084()
+{
+	// the 084's LFSR from reset: shift left, NOT(bit 16) XOR bit 4 into bit 0
+	m_k084_lfsr = std::make_unique<uint32_t[]>(STAR_RNG_PERIOD);
+	uint32_t lfsr = 0;
+	for (int i = 0; i < STAR_RNG_PERIOD; i++)
+	{
+		m_k084_lfsr[i] = lfsr;
+		uint32_t const feedback = (~(lfsr >> 16) ^ (lfsr >> 4)) & 1;
+		lfsr = ((lfsr << 1) | feedback) & 0x1ffff;
+	}
 }
 
 void tutankhm_state::stars_init_bootleg()

@@ -71,6 +71,7 @@ protected:
 	uint8_t m_star_mode = 0;
 	rgb_t m_star_color[64];
 	std::unique_ptr<uint8_t[]> m_stars;
+	std::unique_ptr<uint32_t[]> m_k084_lfsr;
 	uint8_t m_stars_enabled = 0;
 	uint8_t m_stars_blink_state = 0;
 
@@ -83,6 +84,7 @@ protected:
 	void flip_screen_y_w(int state);
 	uint32_t screen_update_bootleg(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);
 	uint32_t screen_update_scramble(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);
+	uint32_t screen_update_k084(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);
 	uint32_t screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);
 	void vblank_irq(int state);
 	void galaxian_palette(palette_device &palette);
@@ -93,6 +95,7 @@ protected:
 	void stars_init();
 	void stars_init_scramble();
 	void stars_init_bootleg();
+	void stars_init_k084();
 	void stars_draw_row(bitmap_rgb32 &bitmap, int maxx, int y, uint32_t star_offs);
 	void scramble_draw_stars(bitmap_rgb32 &bitmap, const rectangle &cliprect, int maxx);
 	void scramble_draw_background(bitmap_rgb32 &bitmap, const rectangle &cliprect);
